@@ -24,7 +24,7 @@ pip install -r requirements.txt
 python breast_cancer_eda_mlp.py
 ```
 
-The dataset is loaded through scikit-learn, so a separate download is not needed. The training script uses a stratified 70/15/15 split and fits standardization on the training set only. It uses validation-loss early stopping.
+**Dataset source:** [UCI Breast Cancer Wisconsin (Diagnostic)](https://archive.ics.uci.edu/dataset/17/breast+cancer+wisconsin+diagnostic). The script uses scikit-learn's bundled mirror of the same dataset, so a separate download is not needed. The training script uses a stratified 70/15/15 split and fits standardization on the training set only. It uses validation-loss early stopping.
 
 ## Notes
 The included run reached 1.000 accuracy and 1.000 ROC-AUC on an 86-case hold-out test split. That small-sample result does not prove generalization. This is an educational coursework project, not a medical diagnostic tool.
