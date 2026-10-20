@@ -13,7 +13,12 @@ from sklearn.datasets import load_breast_cancer
 from sklearn.model_selection import train_test_split
 from sklearn.preprocessing import StandardScaler
 from sklearn.metrics import (accuracy_score, precision_score, recall_score, f1_score,
-                             confusion_matrix, classification_report, roc_curve, roc_auc_score)
+                             confusion_matrix, classification_report, roc_curve, roc_auc_score,
+                             precision_recall_curve, average_precision_score)
+from sklearn.decomposition import PCA
+from sklearn.linear_model import LogisticRegression
+from sklearn.ensemble import RandomForestClassifier
+from sklearn.calibration import calibration_curve
 import torch
 from torch import nn
 from torch.utils.data import TensorDataset, DataLoader
@@ -170,3 +175,244 @@ print(json.dumps(metrics,indent=2))
 print("\nClassification report (0=benign, 1=malignant):")
 print(classification_report(y_test,pred,target_names=["benign","malignant"],zero_division=0))
 print("\nFigures and metrics saved under outputs/")
+
+# Expanded report visuals and baseline comparisons (figures 10-29)
+# Baselines are fit to the same training split and evaluated against the same held-out test set.
+benchmarks = {
+    "MLP": {
+        "accuracy": accuracy_score(y_test, pred),
+        "precision_malignant": precision_score(y_test, pred, zero_division=0),
+        "recall_malignant": recall_score(y_test, pred, zero_division=0),
+        "f1_malignant": f1_score(y_test, pred, zero_division=0),
+        "roc_auc": roc_auc_score(y_test, probs),
+    }
+}
+log_reg = LogisticRegression(max_iter=2000, class_weight="balanced", random_state=SEED)
+log_reg.fit(X_train, y_train)
+log_probs = log_reg.predict_proba(X_test)[:, 1]
+log_pred = (log_probs >= .5).astype(int)
+benchmarks["Logistic Regression"] = {
+    "accuracy": accuracy_score(y_test, log_pred),
+    "precision_malignant": precision_score(y_test, log_pred, zero_division=0),
+    "recall_malignant": recall_score(y_test, log_pred, zero_division=0),
+    "f1_malignant": f1_score(y_test, log_pred, zero_division=0),
+    "roc_auc": roc_auc_score(y_test, log_probs),
+}
+rf = RandomForestClassifier(n_estimators=300, class_weight="balanced", random_state=SEED, n_jobs=-1)
+rf.fit(X_train, y_train)
+rf_probs = rf.predict_proba(X_test)[:, 1]
+rf_pred = (rf_probs >= .5).astype(int)
+benchmarks["Random Forest"] = {
+    "accuracy": accuracy_score(y_test, rf_pred),
+    "precision_malignant": precision_score(y_test, rf_pred, zero_division=0),
+    "recall_malignant": recall_score(y_test, rf_pred, zero_division=0),
+    "f1_malignant": f1_score(y_test, rf_pred, zero_division=0),
+    "roc_auc": roc_auc_score(y_test, rf_probs),
+}
+bench_df = pd.DataFrame(benchmarks).T
+bench_df.index.name = "model"
+bench_df.to_csv(OUT / "baseline_model_comparison.csv")
+
+# Data-quality and class-share visuals.
+fig, ax = plt.subplots(figsize=(7.5, 4.5))
+quality = pd.Series({"Missing cells": int(df.isna().sum().sum()), "Duplicate rows": int(df.duplicated().sum()),
+                     "Predictor columns": len(feature_cols), "Rows": len(df)})
+ax.bar(quality.index, quality.values, color=["#3B82F6", "#10B981", "#F59E0B", "#8B5CF6"])
+ax.set_title("Data Quality and Dataset Size Audit"); ax.set_ylabel("Count"); ax.tick_params(axis="x", rotation=15)
+for i, value in enumerate(quality.values): ax.text(i, value + max(quality.values)*.02, str(value), ha="center", va="bottom")
+fig.tight_layout(); fig.savefig(OUT / "10_data_quality_audit.png", dpi=180); plt.close(fig)
+
+counts = df["diagnosis"].value_counts().reindex(["benign", "malignant"])
+fig, ax = plt.subplots(figsize=(6.5, 5.2))
+ax.pie(counts.values, labels=counts.index, autopct="%1.1f%%", startangle=90,
+       colors=["#10B981", "#F97316"], wedgeprops={"width": .40, "edgecolor": "white"}, pctdistance=.78)
+ax.text(0, 0, f"n = {len(df)}", ha="center", va="center", fontsize=15, fontweight="bold")
+ax.set_title("Diagnosis Proportion"); fig.tight_layout(); fig.savefig(OUT / "11_diagnosis_donut.png", dpi=180); plt.close(fig)
+
+# Additional feature distributions and relationships.
+fig, ax = plt.subplots(figsize=(7.5, 5))
+sns.violinplot(data=df, x="diagnosis", y="worst area", hue="diagnosis", order=["benign","malignant"],
+               palette={"benign":"#10B981","malignant":"#F97316"}, legend=False, inner="quartile", ax=ax)
+ax.set_title("Worst-Area Distribution by Diagnosis"); fig.tight_layout(); fig.savefig(OUT/"12_worst_area_violin.png",dpi=180); plt.close(fig)
+
+fig, ax = plt.subplots(figsize=(7.5,5.2))
+sns.scatterplot(data=df,x="mean perimeter",y="mean area",hue="diagnosis",alpha=.78,
+                palette={"benign":"#10B981","malignant":"#F97316"},ax=ax)
+ax.set_title("Mean Perimeter vs Mean Area"); fig.tight_layout(); fig.savefig(OUT/"13_perimeter_area_scatter.png",dpi=180); plt.close(fig)
+
+eda_std_df = pd.DataFrame(StandardScaler().fit_transform(df[feature_cols]),columns=feature_cols,index=df.index)
+eda_std_df["diagnosis"] = df["diagnosis"].values
+class_means = eda_std_df.groupby("diagnosis")[feature_cols].mean()
+diffs = (class_means.loc["malignant"] - class_means.loc["benign"]).abs().sort_values(ascending=False)
+top_diff_features = diffs.head(10).index.tolist()
+fig, ax = plt.subplots(figsize=(10,5.8))
+sns.heatmap(class_means[top_diff_features],annot=True,fmt=".2f",cmap="vlag",center=0,linewidths=.4,ax=ax)
+ax.set_title("Class Mean Profiles: 10 Largest Standardized Differences")
+fig.tight_layout(); fig.savefig(OUT/"14_class_mean_profile_heatmap.png",dpi=180); plt.close(fig)
+
+correlations = corr.where(np.triu(np.ones(corr.shape),k=1).astype(bool)).stack()
+top_corr = correlations.reindex(correlations.abs().sort_values(ascending=False).head(12).index).sort_values(key=lambda v:v.abs())
+fig, ax = plt.subplots(figsize=(10,7))
+ax.barh([f"{a} <-> {b}" for a,b in top_corr.index],top_corr.values,
+        color=["#2563EB" if v>=0 else "#DC2626" for v in top_corr.values])
+ax.axvline(0,color="black",lw=.8); ax.set_xlim(-1,1)
+ax.set_title("Twelve Strongest Absolute Feature Correlations"); ax.set_xlabel("Pearson correlation")
+fig.tight_layout(); fig.savefig(OUT/"15_top_feature_correlations.png",dpi=180); plt.close(fig)
+
+pca = PCA(n_components=2,random_state=SEED)
+coords = pca.fit_transform(scaler.transform(X).astype(np.float32))
+pca_df = pd.DataFrame({"PC1":coords[:,0],"PC2":coords[:,1],"diagnosis":df["diagnosis"].values})
+fig, ax = plt.subplots(figsize=(7.5,5.6))
+sns.scatterplot(data=pca_df,x="PC1",y="PC2",hue="diagnosis",alpha=.75,s=42,
+                palette={"benign":"#10B981","malignant":"#F97316"},ax=ax)
+ax.set_title("PCA Projection of Standardized Measurements")
+ax.set_xlabel(f"PC1 ({pca.explained_variance_ratio_[0]*100:.1f}% variance)")
+ax.set_ylabel(f"PC2 ({pca.explained_variance_ratio_[1]*100:.1f}% variance)")
+fig.tight_layout(); fig.savefig(OUT/"16_pca_projection.png",dpi=180); plt.close(fig)
+
+# Positive class is malignant (label 1): precision-recall and threshold trade-offs.
+pr_precision, pr_recall, _ = precision_recall_curve(y_test,probs)
+avg_precision = average_precision_score(y_test,probs)
+fig, ax = plt.subplots(figsize=(7.5,5.2))
+ax.plot(pr_recall,pr_precision,lw=2.2,color="#7C3AED",label=f"MLP (AP={avg_precision:.3f})")
+ax.axhline(float(y_test.mean()),ls="--",color="#6B7280",label=f"Positive prevalence={y_test.mean():.2f}")
+ax.set_xlabel("Recall"); ax.set_ylabel("Precision"); ax.set_title("Precision-Recall Curve on Held-Out Test Set")
+ax.set_xlim(0,1.02); ax.set_ylim(0,1.05); ax.legend()
+fig.tight_layout(); fig.savefig(OUT/"17_precision_recall_curve.png",dpi=180); plt.close(fig)
+
+thresholds = np.linspace(.01,.99,99); precisions=[]; recalls=[]; specificities=[]
+for threshold in thresholds:
+    th_pred=(probs>=threshold).astype(int)
+    tn,fp,fn,tp=confusion_matrix(y_test,th_pred,labels=[0,1]).ravel()
+    precisions.append(tp/(tp+fp) if tp+fp else np.nan)
+    recalls.append(tp/(tp+fn) if tp+fn else np.nan)
+    specificities.append(tn/(tn+fp) if tn+fp else np.nan)
+fig, ax=plt.subplots(figsize=(8,5.3))
+ax.plot(thresholds,precisions,label="Precision",color="#2563EB")
+ax.plot(thresholds,recalls,label="Recall / sensitivity",color="#DC2626")
+ax.plot(thresholds,specificities,label="Specificity",color="#059669")
+ax.axvline(.5,ls="--",color="#6B7280",lw=1,label="Default threshold = 0.50")
+ax.set_title("Decision Threshold Trade-offs on Test Cases"); ax.set_xlabel("Probability threshold for malignant")
+ax.set_ylabel("Score"); ax.set_ylim(-.02,1.03); ax.legend(loc="best")
+fig.tight_layout(); fig.savefig(OUT/"18_threshold_tradeoff.png",dpi=180); plt.close(fig)
+
+prob_df=pd.DataFrame({"Predicted probability of malignant":probs,
+                      "Actual diagnosis":np.where(y_test==1,"malignant","benign")})
+fig,ax=plt.subplots(figsize=(7.5,5))
+sns.histplot(data=prob_df,x="Predicted probability of malignant",hue="Actual diagnosis",bins=14,
+             stat="count",element="step",common_norm=False,
+             palette={"benign":"#10B981","malignant":"#F97316"},ax=ax)
+ax.set_title("Predicted Malignancy Probabilities by Actual Class"); ax.set_xlim(0,1)
+fig.tight_layout(); fig.savefig(OUT/"19_probability_distribution.png",dpi=180); plt.close(fig)
+
+sort_idx=np.argsort(probs); point_colors=np.where(y_test[sort_idx]==1,"#F97316","#10B981")
+fig,ax=plt.subplots(figsize=(10,4.8)); ax.scatter(np.arange(len(sort_idx)),probs[sort_idx],c=point_colors,s=35,alpha=.85)
+ax.axhline(.5,color="#111827",ls="--",label="Decision threshold = 0.50")
+ax.set_xlabel("Test cases sorted by predicted malignancy probability"); ax.set_ylabel("Predicted probability of malignant")
+ax.set_title("Sorted Test Predictions (orange = actual malignant; green = actual benign)")
+ax.set_ylim(-.03,1.03); ax.legend()
+fig.tight_layout(); fig.savefig(OUT/"20_sorted_test_predictions.png",dpi=180); plt.close(fig)
+
+# Architecture, split composition, and approximate validation permutation importance.
+from matplotlib.patches import FancyBboxPatch, FancyArrowPatch
+fig,ax=plt.subplots(figsize=(10,4.6)); ax.axis("off")
+blocks=[(.03,.34,.16,.34,"Input layer\n30 features","#DBEAFE"),
+(.25,.34,.19,.34,"Dense: 64\nReLU\nDropout 0.20","#D1FAE5"),
+(.50,.34,.19,.34,"Dense: 32\nReLU\nDropout 0.10","#FEF3C7"),
+(.77,.34,.19,.34,"Output: 1 logit\nSigmoid for probability","#FCE7F3")]
+for x0,y0,w,h,label,fc in blocks:
+    ax.add_patch(FancyBboxPatch((x0,y0),w,h,boxstyle="round,pad=0.012,rounding_size=0.02",fc=fc,ec="#374151",lw=1.2))
+    ax.text(x0+w/2,y0+h/2,label,ha="center",va="center",fontsize=10)
+for i in range(len(blocks)-1):
+    ax.add_patch(FancyArrowPatch((blocks[i][0]+blocks[i][2]+.01,.51),(blocks[i+1][0]-.01,.51),arrowstyle="-|>",mutation_scale=15,color="#4B5563",lw=1.5))
+ax.text(.5,.15,"BCEWithLogitsLoss | Adam, lr=0.001 | weight decay=0.0001 | validation-loss early stopping",ha="center",va="center",fontsize=9.5,wrap=True)
+ax.set_title("Multilayer Perceptron (MLP) Architecture",fontsize=15,pad=10)
+fig.tight_layout(); fig.savefig(OUT/"21_model_architecture.png",dpi=180,bbox_inches="tight"); plt.close(fig)
+
+split_counts=pd.DataFrame({
+    "train":pd.Series(y_train).map({0:"benign",1:"malignant"}).value_counts(),
+    "validation":pd.Series(y_val).map({0:"benign",1:"malignant"}).value_counts(),
+    "test":pd.Series(y_test).map({0:"benign",1:"malignant"}).value_counts()
+}).fillna(0).reindex(["benign","malignant"])
+fig,ax=plt.subplots(figsize=(8,5)); split_counts.T.plot(kind="bar",ax=ax,color=["#10B981","#F97316"])
+ax.set_title("Class Distribution Preserved Across Data Splits"); ax.set_xlabel("Partition"); ax.set_ylabel("Number of cases")
+ax.tick_params(axis="x",rotation=0); ax.legend(title="Diagnosis")
+fig.tight_layout(); fig.savefig(OUT/"22_split_distribution.png",dpi=180); plt.close(fig)
+
+with torch.no_grad():
+    validation_logits=model(torch.tensor(X_val,dtype=torch.float32,device=device)).view(-1).cpu().numpy()
+validation_probs=1/(1+np.exp(-validation_logits)); validation_pred=(validation_probs>=.5).astype(int)
+base_val_acc=accuracy_score(y_val,validation_pred); rng=np.random.default_rng(SEED); importance_rows=[]
+for feat_name in top_diff_features[:10]:
+    feat_idx=feature_cols.index(feat_name); drops=[]
+    for _ in range(10):
+        xperm=X_val.copy(); xperm[:,feat_idx]=rng.permutation(xperm[:,feat_idx])
+        with torch.no_grad():
+            lp=model(torch.tensor(xperm,dtype=torch.float32,device=device)).view(-1).cpu().numpy()
+        pp=1/(1+np.exp(-lp)); drops.append(base_val_acc-accuracy_score(y_val,(pp>=.5).astype(int)))
+    importance_rows.append({"feature":feat_name,"mean_accuracy_drop":float(np.mean(drops)),"std_accuracy_drop":float(np.std(drops))})
+importance_df=pd.DataFrame(importance_rows).sort_values("mean_accuracy_drop",ascending=True)
+importance_df.to_csv(OUT/"permutation_importance_validation.csv",index=False)
+fig,ax=plt.subplots(figsize=(9.5,6))
+ax.barh(importance_df["feature"],importance_df["mean_accuracy_drop"],xerr=importance_df["std_accuracy_drop"],color="#6366F1",alpha=.9,capsize=2)
+ax.axvline(0,color="#111827",lw=.8); ax.set_title("Approximate Permutation Importance on Validation Set")
+ax.set_xlabel("Decrease in validation accuracy after feature shuffling")
+fig.tight_layout(); fig.savefig(OUT/"23_permutation_importance.png",dpi=180); plt.close(fig)
+
+rep=classification_report(y_test,pred,labels=[0,1],target_names=["benign","malignant"],output_dict=True,zero_division=0)
+class_metrics=pd.DataFrame(rep).T.loc[["benign","malignant"],["precision","recall","f1-score"]]
+fig,ax=plt.subplots(figsize=(6.5,3.4)); sns.heatmap(class_metrics,annot=True,fmt=".3f",vmin=0,vmax=1,cmap="YlGnBu",linewidths=.5,ax=ax)
+ax.set_title("Per-Class Test Metrics"); fig.tight_layout(); fig.savefig(OUT/"24_classification_report_heatmap.png",dpi=180); plt.close(fig)
+
+metric_plot=bench_df[["accuracy","precision_malignant","recall_malignant","f1_malignant","roc_auc"]]
+fig,ax=plt.subplots(figsize=(10,5.7)); metric_plot.plot(kind="bar",ax=ax,width=.82)
+ax.set_title("Held-Out Test Metrics: MLP vs Baseline Models"); ax.set_ylabel("Score"); ax.set_xlabel("Model")
+ax.set_ylim(0,1.05); ax.tick_params(axis="x",rotation=0); ax.legend(title="Metric",ncol=2,loc="lower right")
+fig.tight_layout(); fig.savefig(OUT/"25_model_comparison.png",dpi=180); plt.close(fig)
+
+frac_pos,mean_pred=calibration_curve(y_test,probs,n_bins=5,strategy="quantile")
+fig,ax=plt.subplots(figsize=(6.8,5.2)); ax.plot(mean_pred,frac_pos,"o-",label="MLP",color="#7C3AED")
+ax.plot([0,1],[0,1],"--",label="Ideal calibration",color="#6B7280")
+ax.set_xlabel("Mean predicted probability"); ax.set_ylabel("Observed malignant fraction")
+ax.set_title("Probability Calibration Check (5 Quantile Bins)"); ax.set_xlim(0,1); ax.set_ylim(0,1); ax.legend()
+fig.tight_layout(); fig.savefig(OUT/"26_calibration_curve.png",dpi=180); plt.close(fig)
+
+pair_features=["mean radius","mean texture","mean perimeter","mean concavity"]
+pair_grid=sns.pairplot(df[pair_features+["diagnosis"]],hue="diagnosis",diag_kind="hist",corner=True,
+                       palette={"benign":"#10B981","malignant":"#F97316"},plot_kws={"alpha":.65,"s":20},height=1.75)
+pair_grid.fig.suptitle("Pairwise Relationships Among Selected Measurements",y=1.02)
+pair_grid.fig.savefig(OUT/"27_selected_feature_pairplot.png",dpi=170,bbox_inches="tight"); plt.close(pair_grid.fig)
+
+grid_features=["mean radius","mean texture","mean smoothness","mean concavity","worst perimeter","worst area"]
+fig,axes=plt.subplots(2,3,figsize=(13,7.5))
+for ax,feature in zip(axes.ravel(),grid_features):
+    sns.histplot(data=df,x=feature,hue="diagnosis",kde=True,element="step",stat="density",common_norm=False,
+                 palette={"benign":"#10B981","malignant":"#F97316"},ax=ax)
+    ax.set_title(feature.title()); ax.set_ylabel("Density")
+fig.suptitle("Representative Feature Distributions by Diagnosis",y=1.01,fontsize=15)
+fig.tight_layout(); fig.savefig(OUT/"28_feature_distribution_grid.png",dpi=180,bbox_inches="tight"); plt.close(fig)
+
+# End-to-end workflow visual, keeping reproducibility decisions visible.
+fig,ax=plt.subplots(figsize=(12,5.2)); ax.set_xlim(0,1); ax.set_ylim(0,1); ax.axis("off")
+workflow_blocks=[(.025,.55,.13,.25,"1. Data\nloading","#DBEAFE"),(.19,.55,.14,.25,"2. Quality\nchecks","#E0E7FF"),
+(.365,.55,.14,.25,"3. EDA +\nvisualization","#D1FAE5"),(.54,.55,.14,.25,"4. Stratified\nsplitting","#FEF3C7"),
+(.715,.55,.12,.25,"5. Scale +\ntrain MLP","#FCE7F3"),(.87,.55,.105,.25,"6. Evaluate\n+ compare","#FFEDD5")]
+for x0,y0,w,h,label,fc in workflow_blocks:
+    ax.add_patch(FancyBboxPatch((x0,y0),w,h,boxstyle="round,pad=0.012,rounding_size=0.02",fc=fc,ec="#334155",lw=1.2))
+    ax.text(x0+w/2,y0+h/2,label,ha="center",va="center",fontsize=10,fontweight="bold")
+for i in range(len(workflow_blocks)-1):
+    ax.add_patch(FancyArrowPatch((workflow_blocks[i][0]+workflow_blocks[i][2]+.005,.675),(workflow_blocks[i+1][0]-.005,.675),arrowstyle="-|>",mutation_scale=15,color="#475569",lw=1.4))
+ax.add_patch(FancyBboxPatch((.18,.12),.64,.20,boxstyle="round,pad=0.015,rounding_size=0.02",fc="#F8FAFC",ec="#64748B",lw=1))
+ax.text(.5,.22,"Fixed seed | training-only scaler | validation early stopping | held-out test",ha="center",va="center",fontsize=10,wrap=True)
+ax.add_patch(FancyArrowPatch((.77,.54),(.77,.34),arrowstyle="-|>",mutation_scale=14,color="#64748B",lw=1.2))
+ax.set_title("End-to-End Analysis Workflow",fontsize=16,pad=12)
+fig.tight_layout(); fig.savefig(OUT/"29_end_to_end_workflow.png",dpi=180,bbox_inches="tight"); plt.close(fig)
+
+metrics["baseline_models"]={name:{key:float(value) for key,value in row.items()} for name,row in benchmarks.items()}
+metrics["average_precision_malignant"]=float(avg_precision)
+metrics["output_figure_count"]=len(list(OUT.glob("*.png")))
+(OUT/"metrics.json").write_text(json.dumps(metrics,indent=2))
+print("\nBaseline comparison:")
+print(bench_df.round(4).to_string())
+print(f"\nExpanded output figure count: {metrics['output_figure_count']}")
+
