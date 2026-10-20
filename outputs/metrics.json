@@ -9,5 +9,30 @@
   "validation_size": 85,
   "test_size": 86,
   "dataset_rows": 569,
-  "feature_count": 30
+  "feature_count": 30,
+  "baseline_models": {
+    "MLP": {
+      "accuracy": 1.0,
+      "precision_malignant": 1.0,
+      "recall_malignant": 1.0,
+      "f1_malignant": 1.0,
+      "roc_auc": 1.0
+    },
+    "Logistic Regression": {
+      "accuracy": 0.9883720930232558,
+      "precision_malignant": 0.9696969696969697,
+      "recall_malignant": 1.0,
+      "f1_malignant": 0.9846153846153847,
+      "roc_auc": 0.9988425925925927
+    },
+    "Random Forest": {
+      "accuracy": 0.9883720930232558,
+      "precision_malignant": 1.0,
+      "recall_malignant": 0.96875,
+      "f1_malignant": 0.9841269841269841,
+      "roc_auc": 0.9994212962962963
+    }
+  },
+  "average_precision_malignant": 1.0,
+  "output_figure_count": 29
 }
