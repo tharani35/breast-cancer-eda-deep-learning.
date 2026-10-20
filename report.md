@@ -1,85 +1,294 @@
-# Case Study: EDA and Deep Learning
+# Exploratory Data Analysis and Deep Learning
 ## Breast Cancer Diagnosis Using the Wisconsin Diagnostic Dataset
 
 **Student Name:** ______________________________  
-**Register Number:** ___________________________  
-**Department / Year:** _________________________  
-**Course:** Data Visualization / EDA  
-**Submission Date:** ___________________________
+**Register / Roll No.:** _________________________  
+**Department / Year:** __________________________  
+**Course / Subject:** ___________________________  
+**Date of Submission:** _________________________
 
 ## Abstract
-This case study explores the Wisconsin Diagnostic Breast Cancer dataset, containing 569 observations, 30 numerical cell-nucleus measurements, and a binary diagnosis label. The objective is to investigate distributions and relationships among measurements and build an educational deep-learning classifier distinguishing benign from malignant cases. The workflow includes data-quality checks, descriptive statistics, five exploratory visualizations, stratified train/validation/test splitting, training-only standardization, and a multilayer perceptron (MLP) with early stopping. Performance is assessed using accuracy, precision, recall, F1-score, a confusion matrix, and ROC-AUC, alongside loss and validation-accuracy curves. On the fixed held-out test split, this run achieved accuracy 1.000 and ROC-AUC 1.000. These results do not establish clinical suitability; external validation and expert oversight are essential before any real-world medical use.
+
+This report presents an exploratory data analysis and deep-learning case study using the Wisconsin Breast Cancer Diagnostic dataset. The dataset contains 569 cases, 30 continuous numerical features describing cell-nucleus characteristics, and a benign/malignant diagnosis. Data quality was checked for missing values, duplicate rows and extreme values; visualizations were used to study diagnosis balance, feature distributions, correlations, multivariate structure and class differences. A standardized multilayer perceptron (30-64-32-1) was trained with Adam and binary cross-entropy, using a stratified 70/15/15 train/validation/test split and validation-loss early stopping. On one fixed 86-case test split, the MLP achieved 1.000 accuracy and ROC-AUC, while Logistic Regression and Random Forest each achieved 0.988 accuracy. These results demonstrate a complete coursework pipeline but are not evidence of clinical readiness; broader validation is essential.
 
 ## 1. Introduction and Objectives
-Breast cancer diagnosis can involve examining characteristics of cell nuclei obtained from fine-needle aspirates. This project uses numerical measurements to explore benign/malignant differences and demonstrate a reproducible data-analysis workflow.
 
-- Inspect a real dataset with more than 15 fields.
-- Explore distributions, class frequencies, outliers, and feature relationships.
-- Create readable charts and interpret evidence.
-- Train and evaluate an MLP using train/validation/test partitions.
-- Discuss limitations and responsible future improvements.
+Exploratory data analysis (EDA) helps identify data quality issues, class balance, feature distributions, unusual values and relationships among variables before and alongside modelling. This case study uses numerical features computed from digitized fine-needle aspirate images of breast masses. The model operates on 30 tabular measurements, not original image pixels.
+
+**Objectives**
+- Describe a real-world dataset with 30 numerical predictors and a binary diagnosis.
+- Inspect missing values, exact duplicates, outlier flags, distributions and correlated features.
+- Create a minimum of five explained visuals; this expanded report contains 29 figure outputs.
+- Standardize data without fitting the scaler on held-out partitions.
+- Train a PyTorch multilayer perceptron and evaluate it using multiple metrics and charts.
+- Compare the MLP with Logistic Regression and Random Forest baselines.
+- Discuss reproducibility, limitations, and future improvements.
 
 ## 2. Dataset Description
-**Source:** Wisconsin Diagnostic Breast Cancer (WDBC), originally available from the UCI Machine Learning Repository and mirrored by scikit-learn. It has 569 cases, 30 numerical predictors, and diagnosis labels. Predictors include radius, texture, perimeter, area, smoothness, compactness, concavity, symmetry, and fractal dimension, represented by mean, standard-error, and worst measurements.
+
+**Dataset source:** [UCI Machine Learning Repository — Breast Cancer Wisconsin (Diagnostic)](https://archive.ics.uci.edu/dataset/17/breast+cancer+wisconsin+diagnostic). Scikit-learn also distributes a mirror of this dataset. The dataset has 569 instances and 30 continuous predictors. The target has 357 benign cases (62.7%) and 212 malignant cases (37.3%). The feature families are radius, texture, perimeter, area, smoothness, compactness, concavity, concave points, symmetry, and fractal dimension, each represented as a mean, standard error, and worst value.
 
 | Property | Value |
 |---|---:|
-| Rows | 569 |
-| Numerical features | 30 |
-| Benign | 357 (62.7%) |
-| Malignant | 212 (37.3%) |
-| Missing values | 0 |
-| Duplicate rows checked | 0 |
+| Observations | 569 |
+| Numerical predictors | 30 |
+| Benign cases | 357 (62.7%) |
+| Malignant cases | 212 (37.3%) |
+| Missing cells | 0 |
+| Exact duplicate rows | 0 |
+| Task | Binary classification |
 
-The target is moderately imbalanced, so stratified splitting and class-specific metrics are useful.
+Full descriptive statistics are exported as `outputs/feature_summary.csv`. Extreme values are flagged with the 1.5×IQR rule but are not automatically deleted, since statistical extremeness does not prove a measurement is invalid.
 
 ## 3. EDA and Preprocessing
-The code loads data, maps the target to readable labels, and checks missing values and duplicate rows. No imputation was needed. IQR-based outlier counts are calculated for inspection; extreme measurements are not automatically removed because they may be informative. Numerical features are standardized for the MLP. StandardScaler is fitted only on training data to prevent leakage.
 
-A stratified 70%/15%/15% split creates training, validation, and test sets. Validation data is used for early stopping; the test set is reserved for final evaluation.
+The script checks dataset shape, missing values, exact duplicate rows and label frequencies. The target is encoded explicitly as `y=1` for malignant and `y=0` for benign. A stratified split produces 398 training, 85 validation, and 86 test cases. The class counts are 250 benign / 148 malignant in training, 53 / 32 in validation, and 54 / 32 in testing.
 
-## 4. Exploratory Visualizations
-The script generates five EDA visualizations:
+`StandardScaler` is fitted only on the training partition, then applied unchanged to validation and test data. This helps prevent data leakage. IQR-based outlier counts are saved to `outputs/iqr_outlier_counts.csv`. The 30 predictors include strongly correlated size-related measurements, so interpretation of individual variables should be cautious.
 
-1. **Diagnosis class distribution:** benign cases (357) outnumber malignant cases (212), motivating stratified splitting and more than accuracy-only evaluation.
-2. **Mean-radius distributions:** malignant cases tend to have larger mean radius, but distributions overlap; this feature alone is not diagnostic.
-3. **Mean concavity by diagnosis:** malignant cases generally exhibit higher mean concavity.
-4. **Feature correlation heatmap:** several size-related variables are strongly correlated, indicating redundancy; correlation does not imply causation.
-5. **Radius vs texture scatterplot:** groups occupy differing regions but overlap, showing that two features do not perfectly separate classes.
+## 4. Deep Learning Model
 
-Visualization workflow: define the analytical question; select relevant fields; clean/transform data; choose a suitable chart and encoding; create the visual; add labels, scale, and legend; interpret findings. If the course specifies a named seven-stage framework, adjust this mapping to the instructor's terminology.
+The model architecture is **30 inputs → Dense(64) + ReLU + Dropout(0.20) → Dense(32) + ReLU + Dropout(0.10) → one output logit**. It has 4,097 trainable parameters. The sigmoid converts the output logit into a malignant-class probability during evaluation.
 
-## 5. Deep Learning Model
-PyTorch MLP architecture: **30 inputs → Dense(64), ReLU, Dropout(0.20) → Dense(32), ReLU, Dropout(0.10) → one output logit**.
+| Parameter | Setting |
+|---|---|
+| Loss | BCEWithLogitsLoss |
+| Optimizer | Adam |
+| Learning rate | 0.001 |
+| Weight decay | 0.0001 |
+| Batch size | 32 |
+| Dropout | 0.20 and 0.10 |
+| Maximum epochs | 150 |
+| Early-stopping patience | 15 epochs |
+| Random seed | 42 |
 
-Training uses BCEWithLogitsLoss, Adam (learning rate 0.001), weight decay 0.0001, batch size 32, and validation-loss early stopping (patience 15; maximum 150 epochs). Basic tuning is represented by architecture regularization and early stopping. A stronger study would compare hyperparameter settings using validation data only.
+The best validation-loss checkpoint is restored before final test evaluation. The test set is not used for early stopping.
 
-## 6. Evaluation and Results
-The split sizes were 398 training, 85 validation, and 86 test cases. Early stopping selected a checkpoint after 29 epochs.
+## 5. Results and Evaluation
 
-| Metric | Result |
-|---|---:|
-| Test accuracy | 1.000 |
-| Precision (malignant) | 1.000 |
-| Recall (malignant) | 1.000 |
-| F1-score (malignant) | 1.000 |
-| ROC-AUC | 1.000 |
+On the fixed 86-case test split, the MLP achieved accuracy 1.0000, malignant precision 1.0000, malignant recall 1.0000, malignant F1 1.0000, ROC-AUC 1.0000 and average precision 1.0000. Its confusion matrix contains 54 true negatives, 32 true positives, zero false positives and zero false negatives.
 
-The model evaluation visualizations are the training/validation loss curve, validation accuracy curve, held-out test confusion matrix, and ROC curve. This run had no errors on its 86-case test split, but the small sample does not prove perfect generalization. AUC=1.000 on this split should not be interpreted as proof of clinical performance.
+| Model | Accuracy | Malignant precision | Malignant recall | Malignant F1 | ROC-AUC |
+|---|---:|---:|---:|---:|---:|
+| MLP | 1.0000 | 1.0000 | 1.0000 | 1.0000 | 1.0000 |
+| Logistic Regression | 0.9884 | 0.9697 | 1.0000 | 0.9846 | 0.9988 |
+| Random Forest | 0.9884 | 1.0000 | 0.9688 | 0.9841 | 1.0000 |
 
-## 7. Conclusion and Future Scope
-EDA revealed class imbalance, group differences in selected measurements, and correlated predictors. The MLP scored very highly on this fixed test split. However, the dataset and test sample are limited; results may not generalize. This is a coursework demonstration, not a medical diagnostic tool.
+These are split-specific results, not proof of generalization. The test set includes only 32 malignant cases, so confidence in sensitivity is limited by sample size. Repeated stratified cross-validation and external validation are recommended.
 
-Future work: stratified cross-validation, comparison with simpler ML baselines, external validation, calibration and subgroup fairness analysis, confidence intervals, threshold analysis focused on clinically relevant sensitivity, and expert review.
+## 6. Visualization Gallery
 
-## 8. Literature Review and References
-1. Street, W. N., Wolberg, W. H., & Mangasarian, O. L. (1993). Nuclear feature extraction for breast tumor diagnosis. In *Biomedical Image Processing and Biomedical Visualization* (pp. 861–870). SPIE.
-2. UCI Machine Learning Repository. (n.d.). *Breast Cancer Wisconsin (Diagnostic) dataset*. https://archive.ics.uci.edu/dataset/17/breast+cancer+wisconsin+diagnostic
-3. scikit-learn developers. (n.d.). *load_breast_cancer documentation*. https://scikit-learn.org/stable/modules/generated/sklearn.datasets.load_breast_cancer.html
-4. Paszke, A., et al. (2019). PyTorch: An imperative style, high-performance deep learning library. *Advances in Neural Information Processing Systems, 32*.
-5. Fawcett, T. (2006). An introduction to ROC analysis. *Pattern Recognition Letters, 27*(8), 861–874. https://doi.org/10.1016/j.patrec.2005.10.010
+The following charts are generated by `breast_cancer_eda_mlp.py` and saved under `outputs/`. Each caption explains the visual and its limitations.
 
-## Appendix: Running the Code
-Run `pip install -r requirements.txt`, then `python breast_cancer_eda_mlp.py`. The script generates nine charts, `metrics.json`, `training_history.csv`, `feature_summary.csv`, and IQR outlier counts in the `outputs/` folder. Fixing random seeds supports reproducibility; software/hardware may still cause small numerical differences.
 
-**Disclaimer:** This project is for educational use only and must not be used as a medical diagnostic tool.
+### Figure 1. Diagnosis class distribution
+
+![Diagnosis class distribution](outputs/01_class_distribution.png)
+
+There are 357 benign and 212 malignant cases. Stratification is used to preserve this ratio in the train, validation and test partitions.
+
+### Figure 2. Mean radius by diagnosis
+
+![Mean radius by diagnosis](outputs/02_mean_radius_distribution.png)
+
+Malignant cases tend to have larger mean radius, although the distributions overlap. A single measurement is not a diagnostic rule.
+
+### Figure 3. Mean concavity by diagnosis
+
+![Mean concavity by diagnosis](outputs/03_concavity_boxplot.png)
+
+The malignant group has a higher median mean concavity in this sample, supporting a group-level difference but not causation.
+
+### Figure 4. Correlation heatmap of all 30 predictors
+
+![Correlation heatmap of all 30 predictors](outputs/04_correlation_heatmap.png)
+
+Size-related variables are strongly correlated, so some predictors may carry overlapping information.
+
+### Figure 5. Mean radius versus mean texture
+
+![Mean radius versus mean texture](outputs/05_radius_texture_scatter.png)
+
+The class groups occupy partly different regions but overlap in two dimensions.
+
+### Figure 6. Training and validation loss
+
+![Training and validation loss](outputs/06_loss_vs_epoch.png)
+
+Loss decreases rapidly early in training. Early stopping restores the checkpoint associated with the best validation loss.
+
+### Figure 7. Validation accuracy by epoch
+
+![Validation accuracy by epoch](outputs/07_accuracy_vs_epoch.png)
+
+Validation accuracy rises rapidly, then fluctuates slightly. The validation set contains only 85 cases.
+
+### Figure 8. Held-out test confusion matrix
+
+![Held-out test confusion matrix](outputs/08_confusion_matrix.png)
+
+All 54 benign and 32 malignant test cases were classified correctly in this split; small-sample uncertainty remains.
+
+### Figure 9. ROC curve and AUC
+
+![ROC curve and AUC](outputs/09_roc_curve.png)
+
+AUC is 1.000 on this test partition only. ROC-AUC is not a calibration measure.
+
+### Figure 10. Data quality and dataset size audit
+
+![Data quality and dataset size audit](outputs/10_data_quality_audit.png)
+
+The loaded table has 569 rows, 30 predictors, no missing cells and no exact duplicate rows under the performed checks.
+
+### Figure 11. Diagnosis proportion
+
+![Diagnosis proportion](outputs/11_diagnosis_donut.png)
+
+The chart expresses the target ratio as percentages: 62.7% benign and 37.3% malignant.
+
+### Figure 12. Worst-area distribution by diagnosis
+
+![Worst-area distribution by diagnosis](outputs/12_worst_area_violin.png)
+
+The malignant group shows larger worst-area values and a higher-value tail. Extreme values are not automatically errors.
+
+### Figure 13. Mean perimeter versus mean area
+
+![Mean perimeter versus mean area](outputs/13_perimeter_area_scatter.png)
+
+The strong positive relationship reflects related geometric characteristics of nucleus size.
+
+### Figure 14. Standardized class mean profiles
+
+![Standardized class mean profiles](outputs/14_class_mean_profile_heatmap.png)
+
+Ten features with the largest standardized class-mean differences are displayed on a common scale for visual comparison.
+
+### Figure 15. Twelve strongest absolute correlations
+
+![Twelve strongest absolute correlations](outputs/15_top_feature_correlations.png)
+
+The strongest pairs are largely size-related measurements. Correlation does not imply causation.
+
+### Figure 16. PCA projection of standardized features
+
+![PCA projection of standardized features](outputs/16_pca_projection.png)
+
+The first two principal components show partial separation and overlap; only two components are displayed.
+
+### Figure 17. Precision-recall curve
+
+![Precision-recall curve](outputs/17_precision_recall_curve.png)
+
+Average precision is 1.000 on this test split. Precision-recall analysis focuses on the malignant positive class.
+
+### Figure 18. Probability threshold trade-offs
+
+![Probability threshold trade-offs](outputs/18_threshold_tradeoff.png)
+
+Precision, sensitivity and specificity change with the threshold. A 0.50 threshold is a software default, not a clinically justified setting.
+
+### Figure 19. Predicted probabilities by actual class
+
+![Predicted probabilities by actual class](outputs/19_probability_distribution.png)
+
+Test probabilities are well separated by actual label in this run, but external data is needed to assess generalization.
+
+### Figure 20. Sorted test predictions
+
+![Sorted test predictions](outputs/20_sorted_test_predictions.png)
+
+Every test case is on the correct side of the 0.50 threshold in this split; this visual reflects only 86 test cases.
+
+### Figure 21. MLP architecture
+
+![MLP architecture](outputs/21_model_architecture.png)
+
+The network has 30 inputs, hidden layers of 64 and 32 units, dropout and one output logit.
+
+### Figure 22. Class counts across data splits
+
+![Class counts across data splits](outputs/22_split_distribution.png)
+
+Stratification preserves approximately the same ratio across 398 train, 85 validation and 86 test observations.
+
+### Figure 23. Approximate permutation importance
+
+![Approximate permutation importance](outputs/23_permutation_importance.png)
+
+Validation accuracy drops are small and variable for correlated features; treat these scores as exploratory, not definitive.
+
+### Figure 24. Per-class precision, recall and F1
+
+![Per-class precision, recall and F1](outputs/24_classification_report_heatmap.png)
+
+Both classes score 1.000 on this split; this does not remove uncertainty from the small hold-out set.
+
+### Figure 25. MLP versus conventional baselines
+
+![MLP versus conventional baselines](outputs/25_model_comparison.png)
+
+The MLP scored 1.000 accuracy while the two baselines scored 0.988; one split is insufficient to claim general superiority.
+
+### Figure 26. Probability calibration check
+
+![Probability calibration check](outputs/26_calibration_curve.png)
+
+The binned curve is coarse because the test set is small. High AUC does not guarantee well-calibrated probabilities.
+
+### Figure 27. Pairwise relationships among selected features
+
+![Pairwise relationships among selected features](outputs/27_selected_feature_pairplot.png)
+
+The pairplot shows distribution shapes and pairwise correlations among four representative features.
+
+### Figure 28. Representative feature distribution grid
+
+![Representative feature distribution grid](outputs/28_feature_distribution_grid.png)
+
+Six distributions cover size, texture, smoothness and concavity, showing differing degrees of group overlap.
+
+### Figure 29. End-to-end analysis workflow
+
+![End-to-end analysis workflow](outputs/29_end_to_end_workflow.png)
+
+The diagram summarizes data checks, EDA, stratification, scaling, MLP training and final test evaluation.
+
+
+## 7. Discussion and Limitations
+
+- **Single split:** performance may change under another train/test assignment. Repeated stratified cross-validation is recommended.
+- **Small test set:** 86 cases, including 32 malignant cases, provide limited statistical confidence.
+- **Population shift:** model behaviour may change if features are measured under different processes or in different populations.
+- **Correlated predictors:** feature-attribution scores may be unstable because related features can substitute for one another.
+- **Calibration and threshold:** a strong ROC-AUC does not guarantee accurate risk probabilities. A decision threshold requires context-specific assessment.
+- **Clinical safety:** this is a classroom demonstration, not a medical device, screening tool or diagnostic service.
+
+## 8. Conclusion and Future Scope
+
+The case study demonstrates data loading, descriptive analysis, 29 figures, a PyTorch MLP, baseline comparisons and multi-metric evaluation. The MLP performed best on the fixed split, while the conventional baselines also performed strongly. Future work should include repeated cross-validation, external validation, calibration analysis, confidence intervals, subgroup performance checks, threshold analysis and expert review.
+
+## 9. References
+
+1. UCI Machine Learning Repository. “Breast Cancer Wisconsin (Diagnostic).” https://archive.ics.uci.edu/dataset/17/breast+cancer+wisconsin+diagnostic
+2. scikit-learn developers. “load_breast_cancer” documentation. https://scikit-learn.org/stable/modules/generated/sklearn.datasets.load_breast_cancer.html
+3. Street, W. N., Wolberg, W. H., & Mangasarian, O. L. (1993). Nuclear feature extraction for breast tumor diagnosis. *Biomedical Image Processing and Biomedical Visualization*, SPIE, 861–870.
+4. Fawcett, T. (2006). An introduction to ROC analysis. *Pattern Recognition Letters*, 27(8), 861–874. https://doi.org/10.1016/j.patrec.2005.10.010
+5. Paszke, A., et al. (2019). PyTorch: An imperative style, high-performance deep learning library. *Advances in Neural Information Processing Systems*, 32.
+6. Pedregosa, F., et al. (2011). Scikit-learn: Machine learning in Python. *Journal of Machine Learning Research*, 12, 2825–2830.
+7. Saito, T., & Rehmsmeier, M. (2015). The precision-recall plot is more informative than the ROC plot when evaluating binary classifiers on imbalanced datasets. *PLOS ONE*, 10(3), e0118432. https://doi.org/10.1371/journal.pone.0118432
+
+## Appendix A. Run Instructions
+
+```bash
+python -m venv .venv
+# Windows PowerShell: .venv\\Scripts\\Activate.ps1
+# macOS/Linux: source .venv/bin/activate
+pip install -r requirements.txt
+python breast_cancer_eda_mlp.py
+```
+
+The complete commented source file is `breast_cancer_eda_mlp.py`. The run generates chart images, training history, feature summaries, outlier counts, baseline metrics, permutation-importance results and `metrics.json`.
+
+**Disclaimer:** This project is educational only and must not be used for medical decisions.
