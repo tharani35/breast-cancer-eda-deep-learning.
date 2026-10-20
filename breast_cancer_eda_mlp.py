@@ -167,6 +167,6 @@ plt.legend(); plt.tight_layout(); plt.savefig(OUT/"09_roc_curve.png",dpi=180); p
 
 print("\nTEST METRICS")
 print(json.dumps(metrics,indent=2))
-print("\nClassification report (0=malignant, 1=benign):")
-print(classification_report(y_test,pred,target_names=["malignant","benign"],zero_division=0))
+print("\nClassification report (0=benign, 1=malignant):")
+print(classification_report(y_test,pred,target_names=["benign","malignant"],zero_division=0))
 print("\nFigures and metrics saved under outputs/")
