@@ -1,0 +1,31 @@
+feature,IQR_outlier_count
+mean radius,14
+mean texture,7
+mean perimeter,13
+mean area,25
+mean smoothness,6
+mean compactness,16
+mean concavity,18
+mean concave points,10
+mean symmetry,15
+mean fractal dimension,15
+radius error,38
+texture error,20
+perimeter error,38
+area error,65
+smoothness error,30
+compactness error,28
+concavity error,22
+concave points error,19
+symmetry error,27
+fractal dimension error,28
+worst radius,17
+worst texture,5
+worst perimeter,15
+worst area,35
+worst smoothness,7
+worst compactness,16
+worst concavity,12
+worst concave points,0
+worst symmetry,23
+worst fractal dimension,24
