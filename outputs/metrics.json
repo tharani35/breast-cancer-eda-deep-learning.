@@ -1,0 +1,13 @@
+{
+  "test_accuracy": 1.0,
+  "test_precision_malignant": 1.0,
+  "test_recall_malignant": 1.0,
+  "test_f1_malignant": 1.0,
+  "test_roc_auc": 1.0,
+  "epochs_run": 29,
+  "train_size": 398,
+  "validation_size": 85,
+  "test_size": 86,
+  "dataset_rows": 569,
+  "feature_count": 30
+}
